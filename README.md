@@ -45,6 +45,8 @@ Clone this repository:
 ```bash
 git clone https://github.com/yourusername/lung-cancer-cnn.git
 cd lung-cancer-cnn
+```
+
 
 ## 🧠 Model Architecture
 
