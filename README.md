@@ -30,4 +30,18 @@ You can use any lung histopathology dataset such as:
 - [**IQ-OTH/NCCD Lung Cancer Dataset**](https://www.kaggle.com/datasets/adityamahimkar/iqothnccd-lung-cancer-dataset)
 
 Make sure the dataset folder structure looks like this:
+data/
+├── train/
+│ ├── cancer/
+│ └── normal/
+├── test/
+│ ├── cancer/
+│ └── normal
 
+## ⚙️ Installation
+
+Clone this repository:
+
+```bash
+git clone https://github.com/yourusername/lung-cancer-cnn.git
+cd lung-cancer-cnn
