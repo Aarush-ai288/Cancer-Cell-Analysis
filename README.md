@@ -46,18 +46,11 @@ Clone this repository:
 git clone https://github.com/yourusername/lung-cancer-cnn.git
 cd lung-cancer-cnn
 
-
 ## 🧠 Model Architecture
 
-
 Input Layer: 224×224×3 (RGB images)
-
 Conv Layers: 3–4 layers with ReLU activations
-
 Pooling Layers: MaxPooling to reduce dimensions
-
 Dropout Layers: Prevent overfitting
-
 Fully Connected Layers: Dense layers with batch normalization
-
 Output Layer: Sigmoid activation for binary classification
