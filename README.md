@@ -56,3 +56,53 @@ cd lung-cancer-cnn
 - Dropout Layers: Prevent overfitting
 - Fully Connected Layers: Dense layers with batch normalization
 - Output Layer: Sigmoid activation for binary classification
+
+## 📊 Evaluation
+
+Metrics used:
+- Accuracy
+- Precision
+- Recall
+- F1-Score
+- ROC Curve / AUC
+
+## 🧬 Feature Analysis
+
+The model implicitly learns:
+- Cell Size and Shape: Cancerous cells tend to be irregular.
+- Nucleus-to-Cytoplasm Ratio: Cancer cells usually have larger nuclei.
+- Staining Patterns: Abnormal chromatin and staining irregularities correlate with malignancy.
+
+## 🧾 Citation
+
+If you use this work, please cite the dataset authors and this repository:
+
+@dataset{lc25000,
+  title={Lung and Colon Cancer Histopathological Images},
+  author={Borkowski, Andrew and et al.},
+  year={2019},
+  publisher={Kaggle}
+}
+
+## 🛡️ Disclaimer
+
+This project is for educational and research purposes only.
+It does not replace medical diagnosis by a qualified professional.
+
+## 💡 Future Work
+
+Implement attention-based CNNs (e.g., EfficientNet + CBAM)
+
+Add Grad-CAM visualization for region highlighting
+
+Expand to multi-class (adenocarcinoma, squamous, normal)
+
+Integrate with MRI segmentation models
+
+## 🧑‍💻 Author
+
+Aarush Sinha
+Applied Mathematics & Computer Science
+📍 Houston, TX
+📧 [aarushsinha288@gmail.com
+]
