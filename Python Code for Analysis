@@ -1,0 +1,232 @@
+"""
+cancer_cell_classifier.py
+-----------------------------------------
+Research example: Detect cancerous cells in microscopy images using
+both CNN-based texture learning and morphological + staining features.
+
+Educational use only — not a clinical diagnostic tool.
+"""
+
+import os
+import cv2
+import numpy as np
+from PIL import Image
+from pathlib import Path
+from tqdm import tqdm
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms, models
+
+from sklearn.metrics import accuracy_score, confusion_matrix, roc_auc_score
+
+# ==============================
+# 1. Configuration
+# ==============================
+DATA_DIR = Path("data/cells")   # Folder: train/val/test with subfolders 'cancer' and 'normal'
+BATCH_SIZE = 16
+LR = 1e-4
+EPOCHS = 15
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# ==============================
+# 2. Helper functions
+# ==============================
+
+def extract_morph_features(img):
+    """
+    Estimate cell morphology and staining-based quantitative features.
+    Returns: [cell_size, nucleus_area_ratio, cytoplasm_ratio, hematoxylin_mean, eosin_mean]
+    """
+    # Convert to grayscale
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    gray = cv2.GaussianBlur(gray, (5,5), 0)
+
+    # Threshold to separate nucleus (dark) from cytoplasm/background
+    _, nuc_mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+    # Estimate total cell area (assume cell occupies majority of patch)
+    cell_area = np.sum(gray < 250) / gray.size
+
+    # Nucleus area (as fraction)
+    nucleus_area = np.sum(nuc_mask > 0) / gray.size
+    cytoplasm_area = max(cell_area - nucleus_area, 1e-5)
+    n_c_ratio = nucleus_area / cytoplasm_area
+
+    # Estimate staining intensities using RGB channels (approx H&E)
+    hematoxylin_intensity = np.mean(img[:, :, 0])   # blue/purple
+    eosin_intensity = np.mean(img[:, :, 1])         # pink/red
+
+    return np.array([
+        cell_area,
+        nucleus_area,
+        n_c_ratio,
+        hematoxylin_intensity / 255.0,
+        eosin_intensity / 255.0
+    ], dtype=np.float32)
+
+
+class CellDataset(Dataset):
+    """Custom dataset that loads cell images and computes morphology features."""
+    def __init__(self, root_dir, transform=None):
+        self.samples = []
+        self.classes = sorted(os.listdir(root_dir))
+        self.class_to_idx = {cls: i for i, cls in enumerate(self.classes)}
+        for cls in self.classes:
+            for img_path in Path(root_dir, cls).glob("*.png"):
+                self.samples.append((str(img_path), self.class_to_idx[cls]))
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        path, label = self.samples[idx]
+        img = cv2.imread(path)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        morph_feats = extract_morph_features(img)
+
+        if self.transform:
+            img = Image.fromarray(img)
+            img = self.transform(img)
+        else:
+            img = torch.tensor(img.transpose(2,0,1)/255.0, dtype=torch.float32)
+
+        return img, torch.tensor(morph_feats), torch.tensor(label)
+
+# ==============================
+# 3. Transformations
+# ==============================
+train_tf = transforms.Compose([
+    transforms.Resize((224,224)),
+    transforms.RandomHorizontalFlip(),
+    transforms.RandomRotation(10),
+    transforms.ToTensor(),
+    transforms.Normalize([0.5]*3, [0.5]*3)
+])
+
+val_tf = transforms.Compose([
+    transforms.Resize((224,224)),
+    transforms.ToTensor(),
+    transforms.Normalize([0.5]*3, [0.5]*3)
+])
+
+# ==============================
+# 4. DataLoaders
+# ==============================
+train_ds = CellDataset(DATA_DIR/"train", transform=train_tf)
+val_ds   = CellDataset(DATA_DIR/"val",   transform=val_tf)
+test_ds  = CellDataset(DATA_DIR/"test",  transform=val_tf)
+
+train_dl = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
+val_dl   = DataLoader(val_ds, batch_size=BATCH_SIZE)
+test_dl  = DataLoader(test_ds, batch_size=BATCH_SIZE)
+
+print("Classes:", train_ds.classes)
+
+# ==============================
+# 5. Model Definition
+# ==============================
+
+class MorphAwareCNN(nn.Module):
+    """
+    CNN (ResNet-50) + morphological/staining features.
+    Combines CNN image features with numeric morphology features.
+    """
+    def __init__(self, num_classes=2, morph_dim=5):
+        super().__init__()
+        # Pretrained CNN backbone
+        self.cnn = models.resnet50(pretrained=True)
+        in_feats = self.cnn.fc.in_features
+        self.cnn.fc = nn.Identity()  # remove classification layer
+
+        # MLP for morphology features
+        self.morph_net = nn.Sequential(
+            nn.Linear(morph_dim, 16),
+            nn.ReLU(),
+            nn.Linear(16, 8),
+            nn.ReLU()
+        )
+
+        # Combined classifier
+        self.classifier = nn.Sequential(
+            nn.Linear(in_feats + 8, 128),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(128, num_classes)
+        )
+
+    def forward(self, x_img, x_morph):
+        cnn_feats = self.cnn(x_img)           # [batch, 2048]
+        morph_feats = self.morph_net(x_morph) # [batch, 8]
+        combined = torch.cat([cnn_feats, morph_feats], dim=1)
+        out = self.classifier(combined)
+        return out
+
+
+model = MorphAwareCNN().to(DEVICE)
+criterion = nn.CrossEntropyLoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=LR)
+
+# ==============================
+# 6. Training & Validation
+# ==============================
+def run_epoch(loader, train=True):
+    if train:
+        model.train()
+    else:
+        model.eval()
+
+    total_loss, preds, labels = 0, [], []
+    for imgs, morph, lbls in tqdm(loader, leave=False):
+        imgs, morph, lbls = imgs.to(DEVICE), morph.to(DEVICE), lbls.to(DEVICE)
+        if train:
+            optimizer.zero_grad()
+        outputs = model(imgs, morph)
+        loss = criterion(outputs, lbls)
+        if train:
+            loss.backward()
+            optimizer.step()
+
+        total_loss += loss.item() * imgs.size(0)
+        preds.extend(outputs.argmax(1).detach().cpu().numpy())
+        labels.extend(lbls.cpu().numpy())
+
+    acc = accuracy_score(labels, preds)
+    return total_loss / len(loader.dataset), acc
+
+best_val_acc = 0
+for epoch in range(1, EPOCHS+1):
+    tr_loss, tr_acc = run_epoch(train_dl, train=True)
+    val_loss, val_acc = run_epoch(val_dl, train=False)
+    print(f"Epoch {epoch:02d}: Train Acc={tr_acc:.3f}, Val Acc={val_acc:.3f}")
+
+    if val_acc > best_val_acc:
+        best_val_acc = val_acc
+        torch.save(model.state_dict(), "best_model.pt")
+
+# ==============================
+# 7. Testing & Evaluation
+# ==============================
+model.load_state_dict(torch.load("best_model.pt", map_location=DEVICE))
+model.eval()
+
+all_labels, all_preds, all_probs = [], [], []
+with torch.no_grad():
+    for imgs, morph, lbls in test_dl:
+        imgs, morph = imgs.to(DEVICE), morph.to(DEVICE)
+        out = model(imgs, morph)
+        probs = F.softmax(out, dim=1)[:,1].cpu().numpy()
+        preds = out.argmax(1).cpu().numpy()
+        all_labels.extend(lbls.numpy())
+        all_preds.extend(preds)
+        all_probs.extend(probs)
+
+acc = accuracy_score(all_labels, all_preds)
+auc = roc_auc_score(all_labels, all_probs)
+cm  = confusion_matrix(all_labels, all_preds)
+
+print(f"Test Accuracy: {acc:.3f}, AUC: {auc:.3f}")
+print("Confusion Matrix:\n", cm)
