@@ -102,7 +102,7 @@ Integrate with MRI segmentation models
 ## 🧑‍💻 Author
 
 Aarush Sinha
-Applied Mathematics & Computer Science
-📍 Houston, TX
+Mathematics & Computing at Georgia Tech
+📍 Atlanta, GA
 📧 [aarushsinha288@gmail.com
 ]
