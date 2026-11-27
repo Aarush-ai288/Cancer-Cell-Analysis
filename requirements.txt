@@ -2,6 +2,9 @@ tensorflow==2.15.0
 keras==2.15.0
 opencv-python
 numpy
-matplotlib
+pandas
 scikit-learn
-panda
+pillow
+matplotlib
+torchvision
+
